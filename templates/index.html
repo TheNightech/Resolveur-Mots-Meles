@@ -114,8 +114,8 @@
                     // Affiche les actions d'erreur
                     errorActionsDiv.classList.remove('hidden');
                     retryBtn.onclick = function() {
-                         // Relance l'upload (qui relancera le thread)
-                         if (uploadForm) uploadForm.submit();
+                        // Relance l'upload (qui relancera le thread)
+                        window.location.href = "{{ url_for('relaunch_processing') }}";
                     };
                 }
                 
@@ -132,8 +132,8 @@
                 // LOGIQUE D'AFFICHAGE DE LA PROGRESSION
                 if (data.output_exists && data.mots_trouves > 0) {
                     progressInfo.innerHTML = `
-                        **Quelques mots n'ont pas été trouvés.** Voici le premier résultat :<br>
-                        Le programme est en train de chercher les autres mots. (Actuellement, **${data.mots_trouves}** trouvés / ${data.total_mots} total)
+                        Quelques mots n'ont pas été trouvés. Voici le premier résultat : ( ${data.mots_trouves}/ ${data.total_mots} )<br>
+                        Le programme est en train de chercher les autres mots. 
                     `;
                 } else if (data.output_exists) {
                     progressInfo.textContent = "Image générée. Détection des mots en cours...";

@@ -12,14 +12,6 @@ OUTPUT_PATH = Path("static/output/grid_output.png")
 # Renommée et modifiée pour être non récursive
 def run_processing_step(img_path, img_mots, tentatives=1, mots_trouvés=0):
 
-    # Ce nettoyage doit être géré dans app.py avant le lancement de la boucle, 
-    # mais nous le laissons ici pour garantir que le fichier est écrasé/mis à jour.
-    # Pour la première tentative, on s'assure de l'effacer.
-    if tentatives == 1:
-        if OUTPUT_PATH.exists():
-            print("Ancienne image de sortie suprimée (Tentative 1)")
-            OUTPUT_PATH.unlink()
-
     # Lecture des images et conversion en listes de chaînes de caractères
     try:
         list_mots = image_of_list_of_words_to_list_of_string(Image.open(img_mots))
@@ -48,7 +40,7 @@ def run_processing_step(img_path, img_mots, tentatives=1, mots_trouvés=0):
             print(f"Aucun mot supplémentaire trouvé. ({current_mots_trouvés} / {total_mots})")
             return {
                 'status': 'continue', 
-                'mots_trouves': current_mots_trouvés, 
+                'mots_trouves': mots_trouvés, 
                 'total_mots': total_mots, 
                 'tentatives': tentatives + 1
             }
@@ -56,7 +48,8 @@ def run_processing_step(img_path, img_mots, tentatives=1, mots_trouvés=0):
         # Mots trouvés
         print(f"Mots trouvés: {current_mots_trouvés} / {total_mots}")
         
-        make_new_grid(grid_list, answers).save("static/output/grid_output_temp.png")
+        make_new_grid(grid_list, answers).save("static/output/grid_output.png")
+        print("grille créée")
         
         if current_mots_trouvés >= total_mots:
             print("Tous les mots ont été trouvés !")

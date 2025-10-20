@@ -1,4 +1,3 @@
-# app.py
 
 import os
 import threading
@@ -18,6 +17,17 @@ app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
 OUTPUT_DIR = os.path.join(UPLOAD_FOLDER, 'static', 'output')
 os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+# Supression des anciennes potentiels images
+if Path("static/output/grid_output.png").exists():
+    print("Ancienne image de grille de sortie suprimée")
+    Path("static/output/grid_output.png").unlink()
+if Path("grille.png").exists():
+    print("Ancienne image de grille de entrée suprimée")
+    Path("grille.png").unlink()
+if Path("mots.png").exists():
+    print("Ancienne image de liste de mots suprimée")
+    Path("mots.png").unlink()
 
 # --- Statut Global ---
 PROCESS_STATUS = {
@@ -181,6 +191,48 @@ def restart():
     return redirect(url_for('index'))
 
 
+# app.py
+
+# ... (autres imports et configurations) ...
+
+# ... (autres routes) ...
+
+@app.route('/relaunch')
+def relaunch_processing():
+    """
+    Lance le traitement en utilisant les fichiers 'grille.png' et 'mots.png' 
+    déjà sauvegardés, si un processus n'est pas déjà en cours.
+    """
+    
+    if PROCESS_STATUS['en_cours']:
+        return redirect(url_for('index', message="Un traitement est déjà en cours."))
+
+    # Vérifiez que les fichiers existent
+    GRID_PATH = os.path.join(app.config['UPLOAD_FOLDER'], 'grille.png')
+    MOTS_PATH = os.path.join(app.config['UPLOAD_FOLDER'], 'mots.png')
+
+    if not os.path.exists(GRID_PATH) or not os.path.exists(MOTS_PATH):
+        # Si les fichiers n'existent plus, renvoyez l'utilisateur au formulaire
+        return redirect(url_for('index', message="Erreur : Les fichiers précédents ont été supprimés. Veuillez recommencer l'upload."))
+        
+    # 1. Nettoyage de l'ancien fichier de sortie (comme dans /upload)
+    output_path = os.path.join(OUTPUT_DIR, 'grid_output.png')
+    if os.path.exists(output_path):
+        os.remove(output_path)
+        
+    # 2. Lancement asynchrone (Thread)
+    thread = threading.Thread(target=run_processing_loop)
+    thread.start()
+    
+    # 3. Répondre immédiatement au client pour démarrer le polling JS
+    return render_template(
+        'index.html', 
+        message="Relance du traitement en arrière-plan. Vérification de la progression en cours...", 
+        status_check=True
+    )
+    
+# ... (le reste du fichier app.py) ...
+
 @app.route('/upload', methods=['POST'])
 def upload_file():
     
@@ -205,16 +257,7 @@ def upload_file():
     if not success_grille or not success_mots:
         return redirect(url_for('index', message="Erreur lors de la conversion ou sauvegarde d'un des fichiers."))
         
-    # 3. Lancement asynchrone (Thread)
-    thread = threading.Thread(target=run_processing_loop)
-    thread.start()
-    
-    # Répondre immédiatement au client pour démarrer le polling JS
-    return render_template(
-        'index.html', 
-        message="Traitement lancé en arrière-plan. Vérification de la progression en cours...", 
-        status_check=True
-    )
+    return redirect(url_for('relaunch_processing'))
 
 
 @app.route('/status')

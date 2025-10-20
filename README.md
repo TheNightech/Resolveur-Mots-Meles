@@ -28,9 +28,9 @@ pip install -r requirements.txt
 
 4. Créer un fichier .env pour mettre l'API key de votre IA pour openHosta.
 Plus d'explications sur leur documentation:
+https://github.com/hand-e-fr/OpenHosta
 
-
-6. Lancer l'Application
+5. Lancer l'Application
 Assurez-vous que l'environnement virtuel est toujours actif ((.venv) doit être visible dans votre terminal), puis lancez l'application Flask :
 python app.py
 

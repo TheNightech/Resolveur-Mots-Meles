@@ -26,7 +26,11 @@ source .venv/bin/activate
 Installez toutes les librairies nécessaires (Flask, Pillow) à l'aide du fichier requirements.txt :
 pip install -r requirements.txt
 
-4. Lancer l'Application
+4. Créer un fichier .env pour mettre l'API key de votre IA pour openHosta.
+Plus d'explications sur leur documentation:
+
+
+6. Lancer l'Application
 Assurez-vous que l'environnement virtuel est toujours actif ((.venv) doit être visible dans votre terminal), puis lancez l'application Flask :
 python app.py
 

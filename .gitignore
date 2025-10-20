@@ -1,2 +1,13 @@
+# Python Venv
 .venv/
+venv/
+
+# Fichiers sensibles ou temporaires
 .env
+__pycache__/
+*.pyc
+
+# Fichiers générés par l'application
+grille.png
+mots.png
+static/output/

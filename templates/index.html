@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Traitement d'Image Automatisé</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+
+<div class="container">
+    <h1>🚀 Préparation et Lancement du Traitement</h1>
+    <p>Veuillez sélectionner les deux fichiers image pour le traitement.</p>
+
+    <form id="uploadForm" action="/upload" method="POST" enctype="multipart/form-data">
+        
+        <label for="file_grille">Fichier pour la grille de mots mélés:</label>
+        <input type="file" id="file_grille" name="file_grille" accept="image/*" required>
+        
+        <label for="file_mots">Fichier pour la liste de mots à trouver:</label>
+        <input type="file" id="file_mots" name="file_mots" accept="image/*" required>
+        
+        <button type="submit" id="submitBtn">Résoudre la grille</button>
+    </form>
+
+    <div id="loading" class="hidden">
+        <div class="spinner"></div>
+        <p>Traitement en cours... Cela peut prendre quelque temps.</p>
+    </div>
+
+    {% if message %}
+        <div class="message {{ 'success' if 'succès' in message else 'error' }}">
+            {{ message }}
+        </div>
+    {% endif %}
+
+    {% if output_file_exists %}
+        <h2>✅ Mots Trouvés :</h2>
+        <img src="{{ url_for('static', filename='output/grid_output.png') }}?t={{ now() }}" alt="Image de sortie générée (grid_output.png)">
+
+        <div class="restart-section">
+            <a href="{{ url_for('restart') }}">
+                <button type="button" class="restart-btn">🔄 Résoudre une autre grille</button>
+            </a>
+        </div>
+    {% endif %}
+
+</div>
+
+<script>
+    document.getElementById('uploadForm').addEventListener('submit', function() {
+        // Affiche l'icône de chargement et masque le bouton
+        document.getElementById('loading').classList.remove('hidden');
+        document.getElementById('submitBtn').style.display = 'none';
+    });
+</script>
+
+<div id="status_message" class="message hidden"></div>
+<p id="progress_info"></p>
+<img id="grid_output" style="max-width: 100%; display: none; border: 3px solid #007bff; margin-top: 20px;" src="" alt="Image de sortie générée (grid_output.png)">
+
+{% if status_check %}
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            startPolling();
+        });
+    </script>
+{% endif %}
+
+<script>
+    const loadingDiv = document.getElementById('loading');
+    const statusMsgDiv = document.getElementById('status_message');
+    const progressInfo = document.getElementById('progress_info');
+    const outputImg = document.getElementById('grid_output');
+    let refreshInterval = null;
+    let lastTimestamp = 0; // Pour éviter l'actualisation inutile
+
+    function startPolling() {
+        loadingDiv.classList.remove('hidden');
+        statusMsgDiv.classList.remove('hidden');
+        statusMsgDiv.textContent = "Le traitement est en cours...";
+        
+        // Lance immédiatement et répète toutes les 2 secondes
+        refreshInterval = setInterval(checkStatus, 2000); 
+    }
+
+    async function checkStatus() {
+        try {
+            const response = await fetch('{{ url_for("check_status") }}');
+            const data = await response.json();
+            
+            // Si le travail est terminé ou a échoué
+            if (!data.en_cours) {
+                clearInterval(refreshInterval);
+                loadingDiv.classList.add('hidden');
+                
+                if (data.mots_trouves === 'done') {
+                    statusMsgDiv.className = 'message success';
+                    statusMsgDiv.textContent = "✅ Traitement terminé avec succès !";
+                } else if (data.mots_trouves === 'error') {
+                    statusMsgDiv.className = 'message error';
+                    statusMsgDiv.textContent = "❌ Le programme Python a rencontré une erreur.";
+                }
+                progressInfo.textContent = "";
+            } else {
+                // Mise à jour de l'état en cours
+                statusMsgDiv.textContent = "Traitement en cours...";
+                if (data.mots_trouves > 0) {
+                     progressInfo.textContent = `Progression: ${data.mots_trouves} mots trouvés jusqu'à présent.`;
+                } else {
+                     progressInfo.textContent = "Recherche initiale en cours...";
+                }
+            }
+
+            // Actualise l'image si elle existe ET si un nouvel horodatage est reçu
+            if (data.output_exists) {
+                outputImg.style.display = 'block';
+                // N'actualise l'image que si l'horodatage du serveur est plus récent
+                if (data.timestamp > lastTimestamp) {
+                    outputImg.src = "{{ url_for('static', filename='output/grid_output.png') }}?t=" + data.timestamp;
+                    lastTimestamp = data.timestamp;
+                }
+            }
+
+        } catch (error) {
+            clearInterval(refreshInterval);
+            loadingDiv.classList.add('hidden');
+            statusMsgDiv.className = 'message error';
+            statusMsgDiv.textContent = `Erreur de communication avec le serveur: ${error.message}`;
+        }
+    }
+</script>
+
+</body>
+</html>

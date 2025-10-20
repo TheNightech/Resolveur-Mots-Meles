@@ -1,35 +1,41 @@
 # app.py
 
 import os
-import subprocess
 import threading
+from PIL import Image
 from datetime import datetime
 from flask import Flask, render_template, request, redirect, url_for, jsonify
-from PIL import Image
+from pathlib import Path
+import time # Nécessaire pour time.sleep()
+
+# --- IMPORTS DIRECTS DU CODE DE TRAITEMENT ---
+from python_part.main import run_processing_step # Importe la fonction modifiée
 
 # --- Configuration ---
 app = Flask(__name__)
-# Le répertoire UPLOAD_FOLDER est le répertoire racine (où se trouvent app.py et main.py)
 UPLOAD_FOLDER = os.path.dirname(os.path.abspath(__file__)) 
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
-# Le répertoire de sortie pour grid_output.png (dans static)
 OUTPUT_DIR = os.path.join(UPLOAD_FOLDER, 'static', 'output')
-# Assurez-vous que le répertoire static/output existe pour Flask
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-# --- Statut Global (Accessible par Flask et le Thread) ---
-PROCESS_STATUS = {'en_cours': False, 'mots_trouves': 0, 'last_update': 0}
-
+# --- Statut Global ---
+PROCESS_STATUS = {
+    'en_cours': False, 
+    'mots_trouves': 0, 
+    'total_mots': 0, 
+    'last_update': 0, 
+    'message': '',
+    'final_status': None # 'done', 'error', 'finished'
+}
 
 # ----------------------------------------------------------------------
 # FONCTIONS UTILITAIRES
 # ----------------------------------------------------------------------
 
 def convert_and_save(file_stream, target_filename):
-    """Ouvre le flux de fichier, le convertit/enregistre en PNG dans le répertoire racine."""
+    """Ouvre le flux de fichier et l'enregistre en PNG dans le répertoire racine."""
     filepath = os.path.join(app.config['UPLOAD_FOLDER'], target_filename)
-    
     try:
         img = Image.open(file_stream)
         img.save(filepath, "PNG")
@@ -39,63 +45,81 @@ def convert_and_save(file_stream, target_filename):
         return False
 
 
-def run_main_in_thread():
-    """Fonction lancée dans un thread séparé pour exécuter main.py."""
+def run_processing_loop():
+    """
+    Fonction lancée dans un thread pour gérer la boucle d'exécution de main.py
+    jusqu'à la fin ou l'échec.
+    """
     
-    PROCESS_STATUS['en_cours'] = True
-    PROCESS_STATUS['mots_trouves'] = 0
+    # Réinitialisation du statut avant le lancement
+    PROCESS_STATUS.update({
+        'en_cours': True, 
+        'mots_trouves': 0, 
+        'total_mots': 0, 
+        'message': 'Initialisation...',
+        'final_status': None
+    })
     
-    print("\n--- Thread de main.py démarré ---")
+    # Chemins des fichiers que run_processing_step attend
+    img_path = Path("grille.png")
+    img_mots = Path("mots.png")
     
-    # Commande à exécuter (python3 python/main.py)
-    command = ['python3', 'python/main.py']
-
+    # Variables pour la boucle
+    tentatives = 1
+    mots_trouvés = 0
+    status = 'continue'
+    
     try:
-        process = subprocess.Popen(
-            command,
-            cwd=app.config['UPLOAD_FOLDER'], 
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT, 
-            text=True,
-            bufsize=1
-        )
-        
-        # Lecture du flux en temps réel
-        for line in process.stdout:
+        # Boucle tant que le traitement doit continuer (simule la récursion)
+        while status == 'continue':
             
-            print(f"[main.py] {line.strip()}")
+            print(f"\n[Thread] Lancement de l'étape {tentatives}")
             
-            # Détection des mises à jour pour le client (polling)
-            if "grid_output.png" in line or "Mots trouvés:" in line:
-                PROCESS_STATUS['last_update'] = int(datetime.now().timestamp())
-                
-                # Extraction du nombre de mots trouvés (si le format est stable)
-                if "Mots trouvés:" in line:
-                     try:
-                         # Exemple: "Mots trouvés: 15 / 20"
-                         # Note: Le split doit être adapté si votre format de print change
-                         found_str = line.split(':')[1].split('/')[0].strip()
-                         PROCESS_STATUS['mots_trouves'] = int(found_str)
-                     except Exception:
-                         pass
+            # Appel direct à la fonction de traitement
+            result = run_processing_step(
+                img_path, 
+                img_mots, 
+                tentatives=tentatives, 
+                mots_trouvés=mots_trouvés
+            )
+            
+            # Mise à jour du statut global basée sur le retour de run_processing_step
+            mots_trouvés = result.get('mots_trouves', mots_trouvés)
+            status = result['status']
+            tentatives = result.get('tentatives', tentatives)
+            total_mots = result.get('total_mots' , PROCESS_STATUS['total_mots']) # Utilise la valeur du statut s'il n'est pas fourni
 
-        process.wait()
-        
-        # Finalisation
-        if process.returncode == 0:
-            print("Programme main.py terminé avec succès.")
-            PROCESS_STATUS['mots_trouves'] = 'done'
-        else:
-            print(f"Le programme main.py a échoué (Code d'erreur {process.returncode}).")
-            PROCESS_STATUS['mots_trouves'] = 'error'
+            PROCESS_STATUS.update({
+                'mots_trouves': mots_trouvés,
+                'total_mots': total_mots,
+                'last_update': int(datetime.now().timestamp()), 
+                'message': f"Tentative #{tentatives} terminée. Statut: {status}"
+            })
+            
+            # Si le statut n'est plus 'continue', on sort de la boucle
+            if status != 'continue':
+                PROCESS_STATUS['final_status'] = status
+                break
+                
+            # Pause pour éviter une surcharge CPU trop rapide entre les tentatives
+            time.sleep(1) 
+
+        # Finalisation du processus
+        if status == 'done':
+            PROCESS_STATUS['message'] = "✅ Tous les mots ont été trouvés !"
+        elif status == 'finished':
+            PROCESS_STATUS['message'] = "Arrêt: Aucun mot supplémentaire trouvé."
+        elif status == 'error':
+            PROCESS_STATUS['message'] = f"❌ Erreur de traitement: {result.get('message', 'Erreur inconnue')}"
 
     except Exception as e:
-        print(f"Erreur lors de l'exécution du thread: {e}")
-        PROCESS_STATUS['mots_trouves'] = 'error'
+        print(f"Erreur fatale dans le thread de traitement: {e}")
+        PROCESS_STATUS['message'] = f"❌ Erreur fatale: {str(e)}"
+        PROCESS_STATUS['final_status'] = 'error'
 
     finally:
         PROCESS_STATUS['en_cours'] = False
-        print("--- Thread de main.py terminé ---")
+        print("--- Thread de traitement terminé ---")
 
 
 # ----------------------------------------------------------------------
@@ -104,7 +128,6 @@ def run_main_in_thread():
 
 @app.context_processor
 def inject_now():
-    """Injecte l'heure pour le cache-busting (si non géré par timestamp/polling)."""
     def now():
         return datetime.utcnow().strftime('%Y%m%d%H%M%S')
     return {'now': now}
@@ -112,8 +135,23 @@ def inject_now():
 
 @app.route('/')
 def index():
-    """Affiche la page d'accueil."""
-    return render_template('index.html')
+    # Détermine si un résultat final est disponible pour l'affichage statique
+    output_path = os.path.join(OUTPUT_DIR, 'grid_output.png')
+    output_file_exists = os.path.exists(output_path) and not PROCESS_STATUS['en_cours']
+
+    # Réinitialise le message s'il n'y a pas de statut en cours pour ne pas afficher le dernier message d'erreur/succès au rechargement initial
+    message = PROCESS_STATUS['message'] if PROCESS_STATUS['message'] else None
+    
+    # Si le traitement est terminé, on efface le message pour l'affichage final statique
+    if output_file_exists and PROCESS_STATUS['final_status'] in ['done', 'finished']:
+        message = None
+        
+    return render_template(
+        'index.html',
+        status_check=PROCESS_STATUS['en_cours'],
+        output_file_exists=output_file_exists,
+        message=message
+    )
 
 
 @app.route('/restart')
@@ -133,29 +171,29 @@ def restart():
             except Exception as e:
                 print(f"Erreur lors de la suppression de {path}: {e}")
                 
-    # Réinitialisation du statut
-    PROCESS_STATUS.update({'en_cours': False, 'mots_trouves': 0, 'last_update': 0})
+    # Réinitialisation complète du statut
+    PROCESS_STATUS.update({
+        'en_cours': False, 'mots_trouves': 0, 'total_mots': 0, 
+        'last_update': 0, 'message': 'Système réinitialisé.', 
+        'final_status': None
+    })
                 
     return redirect(url_for('index'))
 
 
 @app.route('/upload', methods=['POST'])
 def upload_file():
-    """
-    Gère le téléchargement, la copie des fichiers, et lance l'exécution de main.py
-    dans un thread séparé.
-    """
     
     if PROCESS_STATUS['en_cours']:
-        return render_template('index.html', message="Un traitement est déjà en cours. Veuillez attendre la fin.", output_file_exists=True)
+        return redirect(url_for('index', message="Un traitement est déjà en cours. Veuillez attendre la fin."))
     
     if 'file_grille' not in request.files or 'file_mots' not in request.files:
-        return render_template('index.html', message="Erreur : Les deux fichiers sont requis.", output_file_exists=False)
+        return redirect(url_for('index', message="Erreur : Les deux fichiers sont requis."))
 
     file_grille = request.files['file_grille']
     file_mots = request.files['file_mots']
 
-    # 1. Nettoyage de l'ancien fichier de sortie
+    # 1. Nettoyage de l'ancien fichier de sortie (main.py le fera aussi, mais on s'assure qu'il est effacé immédiatement)
     output_path = os.path.join(OUTPUT_DIR, 'grid_output.png')
     if os.path.exists(output_path):
         os.remove(output_path)
@@ -165,15 +203,18 @@ def upload_file():
     success_mots = convert_and_save(file_mots, 'mots.png')
 
     if not success_grille or not success_mots:
-        return render_template('index.html', message="Erreur lors de la conversion ou sauvegarde d'un des fichiers.", output_file_exists=False)
+        return redirect(url_for('index', message="Erreur lors de la conversion ou sauvegarde d'un des fichiers."))
         
-    
     # 3. Lancement asynchrone (Thread)
-    thread = threading.Thread(target=run_main_in_thread)
+    thread = threading.Thread(target=run_processing_loop)
     thread.start()
     
     # Répondre immédiatement au client pour démarrer le polling JS
-    return render_template('index.html', message="Traitement lancé en arrière-plan. Vérification de la progression en cours...", status_check=True)
+    return render_template(
+        'index.html', 
+        message="Traitement lancé en arrière-plan. Vérification de la progression en cours...", 
+        status_check=True
+    )
 
 
 @app.route('/status')
@@ -186,12 +227,12 @@ def check_status():
     return jsonify({
         'en_cours': PROCESS_STATUS['en_cours'],
         'mots_trouves': PROCESS_STATUS['mots_trouves'],
+        'total_mots': PROCESS_STATUS['total_mots'],
         'output_exists': os.path.exists(output_path),
-        'timestamp': PROCESS_STATUS['last_update'] # Horodatage de la dernière mise à jour
+        'timestamp': PROCESS_STATUS['last_update'],
+        'final_status': PROCESS_STATUS['final_status'] # Nécessaire pour le contrôle JS
     })
 
 
 if __name__ == '__main__':
-    # ATTENTION: Si vous utilisez Flask en mode debug (développement), le reloader peut 
-    # lancer le thread deux fois. Pour la production, utilisez un serveur WSGI standard.
     app.run(debug=True, host='0.0.0.0', port=5000)
